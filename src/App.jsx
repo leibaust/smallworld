@@ -1,35 +1,52 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState, useEffect } from "react";
+import "./App.css";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [count, setCount] = useState(0);
+  const [cards, setCards] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filteredCards, setFilteredCards] = useState([]);
+
+  useEffect(() => {
+    fetch("https://db.ygoprodeck.com/api/v7/cardinfo.php")
+      .then((response) => response.json())
+      .then((data) => setCards(data.data))
+      .catch((error) => console.error("Error fetching data:", error));
+  }, []);
+
+  useEffect(() => {
+    setFilteredCards(
+      cards.filter((card) =>
+        card.name.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    );
+  }, [searchTerm, cards]);
 
   return (
     <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+      <h1>Smallworld Bridge Generator</h1>
+      <div className="search">
+        <input
+          type="text"
+          placeholder="Search..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        {searchTerm && (
+          <div className="dropdown">
+            {filteredCards.map((card) => (
+              <div key={card.id} className="dropdown-item">
+                {card.name}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
+      <div className="currentHand">Hand</div>
+      <div className="deck">Deck</div>
+      <div className="targetMonster">Search Target</div>
     </>
-  )
+  );
 }
 
-export default App
+export default App;
