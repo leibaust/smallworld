@@ -1,16 +1,58 @@
-# React + Vite
+<div align="center">
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+# ⚡ SMALL WORLD CALCULATOR
 
-Currently, two official plugins are available:
+[![React](https://img.shields.io/badge/built%20with-React-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://reactjs.org/)
+[![Yu-Gi-Oh!](https://img.shields.io/badge/YuGiOh%21-Powered%20by%20YGOPRODeck-ff69b4?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTIiIGZpbGw9IiNGRjYwMEQiLz4KPC9zdmc+)](https://db.ygoprodeck.com/api-guide/)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+</div>
 
-## React Compiler
+<div align="center">
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+**The ultimate Yu-Gi-Oh! deck tool for calculating perfect Small World plays.**  
+*Reveal → Bridge → Target. Instant results with real card images and exact stat matching.*
 
-## Expanding the ESLint configuration
+![Demo](https://via.placeholder.com/800x400/1a0828/ffd700?text=Small+World+Calculator+Demo)
+*Screenshot: Deck builder + calculation results*
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+</div>
+
+<br>
+
+## 🎮 Features
+
+<div align="center">
+<table>
+<tr>
+<td>
+
+**🃏 Deck Builder**
+- Search 20k+ monsters (YGOPRODeck API)
+- Add up to 3 copies per card
+- Auto-save to browser storage
+
+</td>
+<td>
+
+**✋ Small World Calculator**
+- Reveal hand monster (tap to select)
+- Find **bridge monsters** (exactly 1 shared stat)
+- **Target any monster** reachable via bridges
+- Visual stat badges + card images
+
+</td>
+</tr>
+</table>
+</div>
+
+## 🚀 Quick Start
+
+```bash
+# Clone/Download
+git clone <your-repo>
+cd small-world-calculator
+
+# Install & Run
+npm install
+npm start
+# → http://localhost:3000
