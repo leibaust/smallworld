@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 
 const API_BASE = "https://db.ygoprodeck.com/api/v7/cardinfo.php";
 
@@ -18,431 +18,540 @@ function exactlyOneShared(a, b) {
 }
 
 function calculateSmallWorld(handMonster, deck, handCards) {
-  // handCards = all monsters in hand (to exclude from targets)
   const handIds = new Set(handCards.map(c => c.id));
-  
-  const results = [];
-  
+  const seenTargets = new Map();
   for (const bridge of deck) {
     if (bridge.id === handMonster.id) continue;
     if (!exactlyOneShared(handMonster, bridge)) continue;
-    
-    // Find targets
     for (const target of deck) {
       if (target.id === bridge.id) continue;
       if (target.id === handMonster.id) continue;
-      if (handIds.has(target.id)) continue; // can't add from deck if it's in hand
+      if (handIds.has(target.id)) continue;
       if (!exactlyOneShared(bridge, target)) continue;
-      
-      results.push({ bridge, target });
+      if (!seenTargets.has(target.id)) {
+        seenTargets.set(target.id, { target, bridges: [bridge] });
+      } else {
+        seenTargets.get(target.id).bridges.push(bridge);
+      }
     }
   }
-  
-  // Deduplicate targets (same target can be reached via multiple bridges)
-  const seenTargets = new Map();
-  for (const r of results) {
-    if (!seenTargets.has(r.target.id)) {
-      seenTargets.set(r.target.id, { target: r.target, bridges: [r.bridge] });
-    } else {
-      seenTargets.get(r.target.id).bridges.push(r.bridge);
-    }
-  }
-  
   return Array.from(seenTargets.values());
 }
 
-// --- Components ---
-function CardImage({ card, size = "sm" }) {
-  const sizes = { sm: 60, md: 80, lg: 120 };
-  const px = sizes[size];
-  const imgUrl = card.card_images?.[0]?.image_url_small || card.card_images?.[0]?.image_url;
-  
+// --- Design tokens ---
+const C = {
+  bg:          "#1a1814",
+  surface:     "#221f1b",
+  border:      "#3a342c",
+  borderStrong:"#5a4e42",
+  ash:         "#857870",
+  clay:        "#9a7a58",
+  sand:        "#c2a47e",
+  linen:       "#e6ddd0",
+  accent:      "#b07030",
+  accentMuted: "#6a4418",
+  red:         "#8a3a2a",
+  green:       "#3a6a3a",
+};
+
+const TYPE_SHORT = (t) => {
+  if (!t) return "?";
+  if (t.includes("Fusion"))   return "fusion";
+  if (t.includes("Synchro"))  return "synchro";
+  if (t.includes("XYZ") || t.includes("Xyz")) return "xyz";
+  if (t.includes("Link"))     return "link";
+  if (t.includes("Ritual"))   return "ritual";
+  if (t.includes("Pendulum")) return "pendulum";
+  if (t.includes("Tuner"))    return "tuner";
+  if (t.includes("Effect"))   return "effect";
+  if (t.includes("Normal"))   return "normal";
+  return t.split(" ")[0].toLowerCase();
+};
+
+const injectStyles = `
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400&family=Courier+Prime:wght@400;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: ${C.bg}; }
+  input::placeholder { color: ${C.ash}; opacity: 1; }
+  input:focus { outline: none; }
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-thumb { background: ${C.border}; }
+`;
+
+// --- Primitives ---
+function Rule({ label }) {
   return (
-    <div style={{
-      width: px, height: px * 1.45,
-      borderRadius: 4,
-      overflow: "hidden",
-      flexShrink: 0,
-      border: "1px solid rgba(255,200,50,0.3)",
-      background: "#1a1020",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.5)"
-    }}>
-      {imgUrl && <img src={imgUrl} alt={card.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0 12px" }}>
+      {label && (
+        <span style={{
+          fontFamily: "'Courier Prime', monospace",
+          fontSize: 8, letterSpacing: 4, color: C.ash, whiteSpace: "nowrap",
+          textTransform: "uppercase",
+        }}>{label}</span>
+      )}
+      <div style={{ flex: 1, height: 1, background: C.border }} />
     </div>
   );
 }
 
-function StatBadge({ label, value }) {
+function Tag({ children }) {
   return (
     <span style={{
-      display: "inline-flex", gap: 3, alignItems: "center",
-      background: "rgba(255,200,50,0.08)",
-      border: "1px solid rgba(255,200,50,0.2)",
-      borderRadius: 3, padding: "1px 5px",
-      fontSize: 10, color: "#c8a84b", fontFamily: "monospace"
-    }}>
-      <span style={{ opacity: 0.6 }}>{label}</span>
-      <span style={{ color: "#f0d060" }}>{value}</span>
-    </span>
+      fontFamily: "'Courier Prime', monospace",
+      fontSize: 8, letterSpacing: 1, color: C.ash,
+      border: `1px solid ${C.border}`,
+      padding: "1px 4px",
+    }}>{children}</span>
   );
 }
 
-function CardRow({ card, onAdd, onRemove, inDeck, count, small }) {
+function CardImg({ card, size = 48 }) {
+  const url = card.card_images?.[0]?.image_url_small || card.card_images?.[0]?.image_url;
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: 10,
-      padding: "8px 10px",
-      background: "rgba(255,255,255,0.03)",
-      borderRadius: 6,
-      border: "1px solid rgba(255,200,50,0.1)",
-      marginBottom: 4
+      width: size, height: Math.round(size * 1.45), flexShrink: 0,
+      background: C.surface, border: `1px solid ${C.border}`, overflow: "hidden",
     }}>
-      <CardImage card={card} size="sm" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ 
-          fontSize: 12, fontWeight: 700, color: "#f0e0a0",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          fontFamily: "'Cinzel', serif"
-        }}>{card.name}</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 3 }}>
-          <StatBadge label="LV" value={card.level} />
-          <StatBadge label="ATK" value={card.atk} />
-          <StatBadge label="DEF" value={card.def} />
-          <StatBadge label="" value={card.attribute} />
-          <StatBadge label="" value={card.type?.replace(" Monster","").replace(" Pendulum","").split(" ").slice(-1)[0]} />
-        </div>
-      </div>
-      {onAdd && !inDeck && (
-        <button onClick={() => onAdd(card)} style={btnStyle("#2a4a2a","#4aff4a")}>+</button>
-      )}
-      {inDeck && (
-        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <span style={{ color:"#f0d060", fontSize:13, fontFamily:"monospace", minWidth:16, textAlign:"center" }}>
-            {count}×
-          </span>
-          <button onClick={() => onRemove(card)} style={btnStyle("#4a2a2a","#ff6060")}>−</button>
-        </div>
-      )}
-      {small && <div style={{ color:"#4aff4a", fontSize:10 }}>✓</div>}
+      {url && <img src={url} alt={card.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />}
     </div>
   );
 }
 
-function btnStyle(bg, color) {
+function CardStats({ card }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+      <Tag>lv {card.level}</Tag>
+      <Tag>atk {card.atk}</Tag>
+      <Tag>def {card.def}</Tag>
+      <Tag>{(card.attribute || "").toLowerCase()}</Tag>
+      <Tag>{TYPE_SHORT(card.type)}</Tag>
+    </div>
+  );
+}
+
+function CardRow({ card, onAdd, inDeck, count, onRemove, inHand, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 12,
+        padding: "10px 0",
+        borderBottom: `1px solid ${C.border}`,
+        cursor: onClick ? "pointer" : "default",
+      }}>
+      <CardImg card={card} size={46} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 13, fontWeight: 700, color: C.linen,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>{card.name}</div>
+        <CardStats card={card} />
+      </div>
+      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        {onAdd && !inDeck && (
+          <button onClick={e => { e.stopPropagation(); onAdd(card); }} style={iconBtn(C.green)}>+</button>
+        )}
+        {inDeck && (
+          <>
+            <span style={{ fontFamily: "'Courier Prime', monospace", fontSize: 10, color: C.clay }}>{count}×</span>
+            <button onClick={e => { e.stopPropagation(); onRemove(card); }} style={iconBtn(C.red)}>−</button>
+          </>
+        )}
+        {inHand && !inDeck && !onAdd && (
+          <span style={{ fontFamily: "'Courier Prime', monospace", fontSize: 8, letterSpacing: 2, color: C.green }}>IN HAND</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function iconBtn(col) {
   return {
-    background: bg, color, border: `1px solid ${color}44`,
-    borderRadius: 4, width: 26, height: 26, cursor: "pointer",
-    fontSize: 16, display:"flex", alignItems:"center", justifyContent:"center",
-    flexShrink: 0, fontWeight: 700, padding: 0
+    width: 24, height: 24,
+    background: "transparent",
+    border: `1px solid ${col}`,
+    color: col,
+    fontFamily: "'Courier Prime', monospace",
+    fontSize: 14, fontWeight: 700,
+    cursor: "pointer", padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
   };
 }
 
-// Tabs
-const TABS = ["🃏 Build Deck", "⚡ Calculate"];
-
+// --- App ---
 export default function SmallWorldApp() {
-  const [tab, setTab] = useState(0);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [tab, setTab]                     = useState(0);
+  const [query, setQuery]                 = useState("");
   const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [deck, setDeck] = useState([]); // [{card, count}]
-  const [results, setResults] = useState(null); // [{target, bridges}]
-  const [selectedHand, setSelectedHand] = useState(null); // which deck monster to reveal
-  const [expandedBridges, setExpandedBridges] = useState({});
-  const debounceRef = useRef(null);
+  const [searching, setSearching]         = useState(false);
+  const [deck, setDeck]                   = useState([]);
+  const [hand, setHand]                   = useState([]);
+  const [revealed, setRevealed]           = useState(null);
+  const [results, setResults]             = useState(null);
+  const [openBridges, setOpenBridges]     = useState({});
+  const timer = useRef(null);
 
-  // Save/load deck from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("sw_deck");
-      if (saved) setDeck(JSON.parse(saved));
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("sw_deck", JSON.stringify(deck));
-    } catch {}
-  }, [deck]);
-
-  const searchCards = useCallback(async (q) => {
+  const doSearch = useCallback(async (q) => {
     if (!q || q.length < 2) { setSearchResults([]); return; }
     setSearching(true);
     try {
-      const res = await fetch(`${API_BASE}?fname=${encodeURIComponent(q)}&type=effect monster,normal monster,ritual monster,fusion monster,synchro monster,xyz monster,link monster,pendulum effect monster,pendulum normal monster,tuner monster`);
-      const data = await res.json();
-      // Filter to monsters with level/atk/def (Small World compatible)
-      const cards = (data.data || []).filter(c => c.level !== undefined && c.atk !== undefined && c.def !== undefined);
-      setSearchResults(cards.slice(0, 20));
+      const r = await fetch(`${API_BASE}?fname=${encodeURIComponent(q)}&type=effect monster,normal monster,ritual monster,fusion monster,synchro monster,xyz monster,link monster,pendulum effect monster,pendulum normal monster,tuner monster`);
+      const d = await r.json();
+      setSearchResults((d.data || []).filter(c => c.level !== undefined && c.atk !== undefined).slice(0, 20));
     } catch { setSearchResults([]); }
     setSearching(false);
   }, []);
 
-  const handleSearch = (q) => {
-    setSearchQuery(q);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => searchCards(q), 400);
+  const handleQuery = q => {
+    setQuery(q);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => doSearch(q), 380);
   };
 
-  const addToDeck = (card) => {
-    setDeck(prev => {
-      const existing = prev.find(e => e.card.id === card.id);
-      if (existing) {
-        return prev.map(e => e.card.id === card.id ? { ...e, count: Math.min(e.count + 1, 3) } : e);
-      }
-      return [...prev, { card, count: 1 }];
-    });
+  const addToDeck = card => setDeck(p => {
+    const x = p.find(e => e.card.id === card.id);
+    if (x) return p.map(e => e.card.id === card.id ? { ...e, count: Math.min(e.count + 1, 3) } : e);
+    return [...p, { card, count: 1 }];
+  });
+
+  const removeFromDeck = card => setDeck(p => {
+    const x = p.find(e => e.card.id === card.id);
+    if (!x) return p;
+    if (x.count <= 1) return p.filter(e => e.card.id !== card.id);
+    return p.map(e => e.card.id === card.id ? { ...e, count: e.count - 1 } : e);
+  });
+
+  const deckUnique   = deck.map(e => e.card);
+  const deckFlatLen  = deck.reduce((s, e) => s + e.count, 0);
+
+  const addToHand = card => {
+    if (hand.find(c => c.id === card.id)) return;
+    setHand(p => [...p, card]);
+    setResults(null);
   };
 
-  const removeFromDeck = (card) => {
-    setDeck(prev => {
-      const existing = prev.find(e => e.card.id === card.id);
-      if (!existing) return prev;
-      if (existing.count <= 1) return prev.filter(e => e.card.id !== card.id);
-      return prev.map(e => e.card.id === card.id ? { ...e, count: e.count - 1 } : e);
-    });
-  };
-
-  const deckFlat = deck.flatMap(e => Array(e.count).fill(e.card));
-  const deckUnique = deck.map(e => e.card);
-
-  const toggleReveal = (card) => {
-    setSelectedHand(prev => prev?.id === card.id ? null : card);
+  const removeFromHand = card => {
+    setHand(p => p.filter(c => c.id !== card.id));
+    if (revealed?.id === card.id) setRevealed(null);
     setResults(null);
   };
 
   const calculate = () => {
-    if (!selectedHand) return;
-    const res = calculateSmallWorld(selectedHand, deckUnique, []);
-    setResults(res);
-    setExpandedBridges({});
+    if (!revealed || !deckUnique.length) return;
+    setResults(calculateSmallWorld(revealed, deckUnique, hand));
+    setOpenBridges({});
   };
 
-  const toggleBridge = (targetId) => {
-    setExpandedBridges(prev => ({ ...prev, [targetId]: !prev[targetId] }));
-  };
+  const toggleBridge = id => setOpenBridges(p => ({ ...p, [id]: !p[id] }));
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      width: "100%",
-      boxSizing: "border-box",
-      background: "radial-gradient(ellipse at 20% 0%, #1a0828 0%, #0d0d1a 40%, #060610 100%)",
-      color: "#e8d8b0",
-      fontFamily: "'Segoe UI', sans-serif",
-      fontSize: 14,
-    }}>
-      {/* Header */}
-      <div style={{
-        background: "linear-gradient(135deg, #1a0828 0%, #2a1040 50%, #1a0828 100%)",
-        borderBottom: "1px solid rgba(255,200,50,0.3)",
-        padding: "16px 20px",
-        textAlign: "center",
-        position: "relative",
-        overflow: "hidden"
-      }}>
+    <>
+      <style>{injectStyles}</style>
+      <div style={{ minHeight: "100vh", background: C.bg, color: C.linen, fontSize: 14 }}>
+
+        {/* HEADER */}
         <div style={{
-          position: "absolute", inset: 0,
-          background: "radial-gradient(ellipse at 50% 100%, rgba(200,100,255,0.15) 0%, transparent 70%)"
-        }} />
-        <div style={{ position: "relative" }}>
-          <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 3, color: "#f0d060", fontFamily: "'Cinzel', serif", textShadow: "0 0 20px rgba(240,200,80,0.5)" }}>
-            ⚡ SMALL WORLD
+          borderBottom: `1px solid ${C.borderStrong}`,
+          padding: "22px 20px 18px",
+          display: "flex", justifyContent: "space-between", alignItems: "flex-end",
+          position: "relative",
+        }}>
+          {/* Left copper bar */}
+          <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: C.accent }} />
+          <div style={{ paddingLeft: 14 }}>
+            <div style={{
+              fontFamily: "'Courier Prime', monospace",
+              fontSize: 8, letterSpacing: 5, color: C.ash,
+              textTransform: "uppercase", marginBottom: 8,
+            }}>
+              yu-gi-oh / utility
+            </div>
+            <div style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: 32, fontWeight: 900,
+              color: C.linen, lineHeight: 1, letterSpacing: -1,
+            }}>
+              small world
+            </div>
+            <div style={{
+              fontFamily: "'Playfair Display', serif",
+              fontStyle: "italic", fontSize: 13, color: C.clay, marginTop: 3,
+            }}>
+              bridge calculator
+            </div>
           </div>
-          <div style={{ fontSize: 10, letterSpacing: 5, color: "#a080c0", marginTop: 2 }}>CALCULATOR</div>
+          <div style={{
+            fontFamily: "'Courier Prime', monospace",
+            fontSize: 8, letterSpacing: 2, color: C.border,
+            textAlign: "right", lineHeight: 1.8,
+          }}>
+            TYPE<br/>ATTRIBUTE<br/>LEVEL<br/>ATK / DEF
+          </div>
         </div>
-      </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: "1px solid rgba(255,200,50,0.2)" }}>
-        {TABS.map((t, i) => (
-          <button key={i} onClick={() => setTab(i)} style={{
-            flex: 1, padding: "12px 8px", border: "none", cursor: "pointer",
-            background: tab === i ? "rgba(255,200,50,0.1)" : "transparent",
-            color: tab === i ? "#f0d060" : "#806040",
-            borderBottom: tab === i ? "2px solid #f0d060" : "2px solid transparent",
-            fontSize: 12, fontWeight: 700, letterSpacing: 1,
-            transition: "all 0.2s"
-          }}>{t}</button>
-        ))}
-      </div>
+        {/* TABS */}
+        <div style={{ display: "flex", borderBottom: `1px solid ${C.border}` }}>
+          {["deck", "hand"].map((t, i) => (
+            <button key={i} onClick={() => setTab(i)} style={{
+              flex: 1, padding: "11px 0",
+              background: "transparent", border: "none",
+              borderBottom: `2px solid ${tab === i ? C.accent : "transparent"}`,
+              color: tab === i ? C.sand : C.ash,
+              fontFamily: "'Courier Prime', monospace",
+              fontSize: 10, letterSpacing: 5, textTransform: "uppercase",
+              cursor: "pointer", marginBottom: -1,
+            }}>{t}</button>
+          ))}
+        </div>
 
-      <div style={{ maxWidth: 600, width: "100%", margin: "0 auto", padding: "16px 12px", boxSizing: "border-box" }}>
+        <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 16px 60px" }}>
 
-        {/* TAB 0: BUILD DECK */}
-        {tab === 0 && (
-          <div>
-            <div style={{ marginBottom: 12 }}>
+          {/* ---- TAB: DECK ---- */}
+          {tab === 0 && (
+            <>
+              <Rule label="search" />
               <input
-                placeholder="🔍 Search monster cards..."
-                value={searchQuery}
-                onChange={e => handleSearch(e.target.value)}
+                value={query}
+                onChange={e => handleQuery(e.target.value)}
+                placeholder="search by name..."
                 style={{
-                  width: "100%", boxSizing: "border-box",
-                  padding: "10px 14px",
-                  background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,200,50,0.3)",
-                  borderRadius: 8, color: "#f0e0a0", fontSize: 14,
-                  outline: "none"
+                  width: "100%", padding: "10px 12px",
+                  background: C.surface, border: `1px solid ${C.border}`,
+                  borderLeft: `2px solid ${C.clay}`,
+                  color: C.linen,
+                  fontFamily: "'Courier Prime', monospace", fontSize: 13, letterSpacing: 0.5,
                 }}
               />
-            </div>
 
-            {searching && <div style={{ color: "#a080c0", textAlign:"center", padding: 16 }}>Searching...</div>}
-
-            {searchResults.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, letterSpacing: 2, color: "#806040", marginBottom: 8 }}>SEARCH RESULTS</div>
-                {searchResults.map(card => {
-                  const inDeck = deck.find(e => e.card.id === card.id);
-                  return <CardRow key={card.id} card={card} onAdd={addToDeck} onRemove={removeFromDeck} inDeck={!!inDeck} count={inDeck?.count} />;
-                })}
-              </div>
-            )}
-
-            <div>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 8 }}>
-                <div style={{ fontSize: 10, letterSpacing: 2, color: "#806040" }}>YOUR DECK ({deckFlat.length} monsters)</div>
-                {deck.length > 0 && <button onClick={() => setDeck([])} style={{ background:"none", border:"none", color:"#ff6060", cursor:"pointer", fontSize:11 }}>Clear</button>}
-              </div>
-              {deck.length === 0 && (
-                <div style={{ textAlign:"center", color:"#504030", padding:24, border:"1px dashed rgba(255,200,50,0.1)", borderRadius:8 }}>
-                  Search and add monsters to build your deck
+              {searching && (
+                <div style={{ fontFamily: "'Courier Prime', monospace", fontSize: 9, letterSpacing: 4, color: C.ash, padding: "12px 0" }}>
+                  searching...
                 </div>
               )}
-              {deck.map(({ card, count }) => (
-                <CardRow key={card.id} card={card} onRemove={removeFromDeck} inDeck count={count} />
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* TAB 1: CALCULATE */}
-        {tab === 1 && (
-          <div>
-            {/* Reveal selector + activate */}
-            <div style={{ marginBottom: 16 }}>
-              {selectedHand ? (
-                <div style={{ color:"#c0a040", fontSize:11, marginBottom:8 }}>
-                  Revealing: <strong style={{color:"#f0d060"}}>{selectedHand.name}</strong>
+              {searchResults.length > 0 && (
+                <>
+                  <Rule label={`${searchResults.length} results`} />
+                  {searchResults.map(card => {
+                    const inDeck = deck.find(e => e.card.id === card.id);
+                    return <CardRow key={card.id} card={card} onAdd={addToDeck} onRemove={removeFromDeck} inDeck={!!inDeck} count={inDeck?.count} />;
+                  })}
+                </>
+              )}
+
+              <Rule label={`deck  ${deckFlatLen} cards`} />
+
+              {deck.length === 0 ? (
+                <div style={{
+                  border: `1px solid ${C.border}`, padding: "28px",
+                  textAlign: "center",
+                  fontFamily: "'Courier Prime', monospace", fontSize: 9, letterSpacing: 3, color: C.border,
+                }}>
+                  no cards added yet
                 </div>
               ) : (
-                <div style={{ color:"#504030", textAlign:"center", padding:"10px 0", fontSize:11, marginBottom:8 }}>
-                  Tap a monster below to select it as the card you reveal from hand
-                </div>
-              )}
-
-              <button
-                onClick={calculate}
-                disabled={!selectedHand || deckUnique.length === 0}
-                style={{
-                  width:"100%", padding:"12px",
-                  background: selectedHand && deckUnique.length > 0
-                    ? "linear-gradient(135deg, #4a2080, #8040c0)"
-                    : "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(200,100,255,0.4)",
-                  borderRadius: 8, color: selectedHand && deckUnique.length > 0 ? "#fff" : "#504040",
-                  fontSize: 14, fontWeight: 700, cursor: selectedHand && deckUnique.length > 0 ? "pointer" : "not-allowed",
-                  letterSpacing: 2, transition: "all 0.2s"
-                }}>
-                ⚡ ACTIVATE SMALL WORLD
-              </button>
-            </div>
-
-            {/* Deck — tap to select reveal card */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 10, letterSpacing: 2, color: "#806040", marginBottom: 8 }}>
-                DECK ({deckUnique.length} monsters) — tap to reveal
-              </div>
-              {deck.length === 0 && (
-                <div style={{ color:"#504030", textAlign:"center", padding:16 }}>
-                  Build your deck in the first tab
-                </div>
-              )}
-              {deck.map(({ card }) => (
-                <div key={card.id} onClick={() => toggleReveal(card)} style={{ cursor:"pointer" }}>
-                  <CardRow card={card} small={selectedHand?.id === card.id} />
-                </div>
-              ))}
-            </div>
-
-            {/* Results */}
-            {results !== null && (
-              <div>
-                <div style={{
-                  padding: "12px 14px",
-                  background: "rgba(200,100,255,0.08)",
-                  border: "1px solid rgba(200,100,255,0.3)",
-                  borderRadius: 8, marginBottom: 12
-                }}>
-                  <div style={{ fontSize: 10, letterSpacing: 2, color: "#a080c0" }}>SMALL WORLD RESULTS</div>
-                  <div style={{ fontSize: 20, fontWeight: 900, color: results.length > 0 ? "#f0d060" : "#ff6060" }}>
-                    {results.length} {results.length === 1 ? "monster" : "monsters"} reachable
+                <>
+                  {deck.map(({ card, count }) => (
+                    <CardRow key={card.id} card={card} onRemove={removeFromDeck} inDeck count={count} />
+                  ))}
+                  <div style={{ marginTop: 16 }}>
+                    <button onClick={() => setDeck([])} style={{
+                      background: "transparent", border: `1px solid ${C.border}`,
+                      color: C.ash, fontFamily: "'Courier Prime', monospace",
+                      fontSize: 8, letterSpacing: 3, padding: "6px 12px",
+                      cursor: "pointer", textTransform: "uppercase",
+                    }}>clear all</button>
                   </div>
-                  {results.length === 0 && (
-                    <div style={{ color:"#806040", fontSize:11, marginTop:4 }}>
-                      No valid bridges found with this hand monster.
-                    </div>
-                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ---- TAB: HAND ---- */}
+          {tab === 1 && (
+            <>
+              <Rule label="hand" />
+
+              {hand.length === 0 ? (
+                <div style={{
+                  border: `1px solid ${C.border}`, padding: "20px",
+                  fontFamily: "'Courier Prime', monospace", fontSize: 9, letterSpacing: 3, color: C.border, textAlign: "center"
+                }}>
+                  select monsters from deck below
                 </div>
-
-                {results.map(({ target, bridges }) => (
-                  <div key={target.id} style={{
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,200,50,0.15)",
-                    borderRadius: 8, marginBottom: 8, overflow:"hidden"
-                  }}>
-                    {/* Target */}
-                    <div style={{ padding: "10px 12px", display:"flex", alignItems:"center", gap:10 }}>
-                      <CardImage card={target} size="sm" />
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:13, fontWeight:700, color:"#f0d060", fontFamily:"'Cinzel',serif" }}>
-                          {target.name}
-                        </div>
-                        <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginTop:3 }}>
-                          <StatBadge label="LV" value={target.level} />
-                          <StatBadge label="ATK" value={target.atk} />
-                          <StatBadge label="DEF" value={target.def} />
-                          <StatBadge label="" value={target.attribute} />
-                        </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 0, border: `1px solid ${C.border}` }}>
+                  {hand.map(card => {
+                    const isRev = revealed?.id === card.id;
+                    return (
+                      <div
+                        key={card.id}
+                        onClick={() => setRevealed(p => p?.id === card.id ? null : card)}
+                        style={{
+                          padding: 8, cursor: "pointer",
+                          background: isRev ? C.accentMuted : "transparent",
+                          borderRight: `1px solid ${C.border}`,
+                          borderBottom: `1px solid ${C.border}`,
+                          borderTop: `2px solid ${isRev ? C.accent : "transparent"}`,
+                          position: "relative",
+                          transition: "background 0.12s",
+                        }}>
+                        <CardImg card={card} size={54} />
+                        {isRev && (
+                          <div style={{
+                            fontFamily: "'Courier Prime', monospace",
+                            fontSize: 7, letterSpacing: 3, color: C.accent,
+                            textAlign: "center", marginTop: 4,
+                          }}>reveal</div>
+                        )}
+                        <button
+                          onClick={e => { e.stopPropagation(); removeFromHand(card); }}
+                          style={{
+                            position: "absolute", top: 2, right: 2,
+                            background: C.bg, border: `1px solid ${C.border}`,
+                            color: C.ash, width: 14, height: 14,
+                            fontSize: 8, cursor: "pointer", padding: 0,
+                            fontFamily: "'Courier Prime', monospace",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>x</button>
                       </div>
-                      <button onClick={() => toggleBridge(target.id)} style={{
-                        background:"rgba(255,200,50,0.1)", border:"1px solid rgba(255,200,50,0.2)",
-                        color:"#c0a040", borderRadius:4, padding:"4px 8px", cursor:"pointer", fontSize:10
-                      }}>
-                        {expandedBridges[target.id] ? "▲" : "▼"} {bridges.length} bridge{bridges.length>1?"s":""}
-                      </button>
-                    </div>
+                    );
+                  })}
+                </div>
+              )}
 
-                    {/* Bridges */}
-                    {expandedBridges[target.id] && (
-                      <div style={{ borderTop:"1px solid rgba(255,200,50,0.1)", padding:"8px 12px", background:"rgba(0,0,0,0.2)" }}>
-                        <div style={{ fontSize:10, color:"#806040", letterSpacing:2, marginBottom:6 }}>VIA BRIDGE:</div>
-                        {bridges.map(bridge => (
-                          <div key={bridge.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                            <CardImage card={bridge} size="sm" />
-                            <div>
-                              <div style={{ fontSize:11, color:"#c0a060", fontWeight:700 }}>{bridge.name}</div>
-                              <div style={{ display:"flex", gap:3, marginTop:2 }}>
-                                <StatBadge label="LV" value={bridge.level} />
-                                <StatBadge label="ATK" value={bridge.atk} />
-                                <StatBadge label="DEF" value={bridge.def} />
+              {revealed && (
+                <div style={{
+                  marginTop: 10,
+                  borderLeft: `2px solid ${C.accent}`, paddingLeft: 10,
+                  fontFamily: "'Courier Prime', monospace",
+                  fontSize: 9, letterSpacing: 1, color: C.clay,
+                }}>
+                  revealing — <span style={{ color: C.sand, fontStyle: "italic" }}>{revealed.name}</span>
+                </div>
+              )}
+
+              {/* Activate */}
+              <div style={{ marginTop: 16, marginBottom: 4 }}>
+                <button
+                  onClick={calculate}
+                  disabled={!revealed || !deckUnique.length}
+                  style={{
+                    width: "100%", padding: "13px 0",
+                    background: revealed && deckUnique.length ? C.accent : "transparent",
+                    border: `1px solid ${revealed && deckUnique.length ? C.accent : C.border}`,
+                    color: revealed && deckUnique.length ? C.bg : C.border,
+                    fontFamily: "'Courier Prime', monospace",
+                    fontSize: 10, letterSpacing: 5, textTransform: "uppercase", fontWeight: 700,
+                    cursor: revealed && deckUnique.length ? "pointer" : "not-allowed",
+                  }}>
+                  activate small world
+                </button>
+              </div>
+
+              {/* Results */}
+              {results !== null && (
+                <>
+                  {/* Score block */}
+                  <div style={{
+                    display: "flex",
+                    borderLeft: `3px solid ${results.length > 0 ? C.accent : C.red}`,
+                    borderBottom: `1px solid ${C.border}`,
+                    padding: "16px 16px 14px",
+                    marginBottom: 14, marginTop: 8,
+                    background: C.surface,
+                    alignItems: "flex-end", gap: 16,
+                  }}>
+                    <div style={{
+                      fontFamily: "'Playfair Display', serif",
+                      fontSize: 52, fontWeight: 900, lineHeight: 1,
+                      color: results.length > 0 ? C.sand : C.red,
+                    }}>{results.length}</div>
+                    <div>
+                      <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 14, color: C.clay }}>
+                        {results.length === 1 ? "monster reachable" : "monsters reachable"}
+                      </div>
+                      {results.length === 0 && (
+                        <div style={{ fontFamily: "'Courier Prime', monospace", fontSize: 9, color: C.ash, marginTop: 4, letterSpacing: 1 }}>
+                          no valid bridge — try another monster
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {results.map(({ target, bridges }) => (
+                    <div key={target.id} style={{
+                      border: `1px solid ${C.border}`,
+                      background: C.surface,
+                      marginBottom: 6,
+                    }}>
+                      <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 12 }}>
+                        <CardImg card={target} size={46} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontFamily: "'Playfair Display', serif",
+                            fontSize: 13, fontWeight: 700, color: C.linen,
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          }}>{target.name}</div>
+                          <CardStats card={target} />
+                        </div>
+                        <button
+                          onClick={() => toggleBridge(target.id)}
+                          style={{
+                            background: "transparent", border: `1px solid ${C.border}`,
+                            color: C.ash,
+                            fontFamily: "'Courier Prime', monospace",
+                            fontSize: 8, letterSpacing: 2, padding: "4px 8px",
+                            cursor: "pointer", flexShrink: 0, textTransform: "uppercase",
+                          }}>
+                          {openBridges[target.id] ? "hide" : `${bridges.length} bridge${bridges.length > 1 ? "s" : ""}`}
+                        </button>
+                      </div>
+
+                      {openBridges[target.id] && (
+                        <div style={{
+                          borderTop: `1px solid ${C.border}`,
+                          padding: "10px 12px", background: C.bg,
+                        }}>
+                          <div style={{ fontFamily: "'Courier Prime', monospace", fontSize: 8, letterSpacing: 4, color: C.ash, marginBottom: 10 }}>
+                            via bridge
+                          </div>
+                          {bridges.map(b => (
+                            <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                              <CardImg card={b} size={38} />
+                              <div>
+                                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 12, color: C.sand }}>{b.name}</div>
+                                <CardStats card={b} />
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
 
-      {/* Google Font */}
-      <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&display=swap" rel="stylesheet" />
-    </div>
+              {/* Deck picker */}
+              <Rule label="deck — tap to add to hand" />
+              {deck.length === 0 ? (
+                <div style={{
+                  border: `1px solid ${C.border}`, padding: "20px",
+                  fontFamily: "'Courier Prime', monospace", fontSize: 9, letterSpacing: 3, color: C.border, textAlign: "center"
+                }}>build your deck first</div>
+              ) : deck.map(({ card }) => (
+                <CardRow
+                  key={card.id}
+                  card={card}
+                  inHand={!!hand.find(c => c.id === card.id)}
+                  onClick={() => addToHand(card)}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
